@@ -1,11 +1,13 @@
 .PHONY = clean
 
+NAME := raptors-and-prey
+
 all:
-	gcc main.c -lraylib -o raptor-and-prey
+	gcc main.c -Wall -Wpedantic -ggdb -lraylib -o ${NAME}
 
 run: all
-	./raptor-and-prey
+	./${NAME}
 
 clean:
-	rm raptor-and-prey
+	rm ${NAME}
 
