@@ -14,7 +14,7 @@
 #define FIELD_Y 160
 #define CELL_SIZE 32
 #define FIELD_SIZE_X 30
-#define FIELD_SIZE_Y 16
+#define FIELD_SIZE_Y 15
 
 #define MAIN_FONT_SIZE 32
 #define CELL_FONT_SIZE 28
@@ -27,9 +27,9 @@
 #define EMPTY 3
 
 static uint16_t amount[3] = {
-    10,	// FEMALE_WOLF
-    10,	// MALE_WOLF
-    20,	// RABBIT
+    10, // FEMALE_WOLF
+    10, // MALE_WOLF
+    20, // RABBIT
 };
 static char amount_str[3][STR_SIZE];
 
@@ -49,11 +49,13 @@ typedef struct {
 static Cell field[FIELD_SIZE_Y][FIELD_SIZE_X];
 static char energy_str[STR_SIZE];
 
+static int mod(int a, int b) { return (a % b + b) % b; }
+
 static void get_random_empty(int *x, int *y) {
   int preserver = 0;
   do {
-    *x = GetRandomValue(0, FIELD_SIZE_X);
-    *y = GetRandomValue(0, FIELD_SIZE_Y);
+    *x = GetRandomValue(0, FIELD_SIZE_X - 1);
+    *y = GetRandomValue(0, FIELD_SIZE_Y - 1);
     preserver++;
   } while (field[*y][*x].kind != EMPTY &&
            preserver < FIELD_SIZE_X * FIELD_SIZE_Y);
@@ -77,6 +79,162 @@ static void reset(void) {
     get_random_empty(&x, &y);
     field[y][x] = (Cell){.kind = RABBIT, .value = 0, .active = true};
   }
+  day = 1;
+}
+
+static bool is_active_around(int x, int y, int kind, int *out_res_x,
+                             int *out_res_y) {
+  for (int i = -1; i <= 1; i++)
+    for (int j = -1; j <= 1; j++) {
+      if (i == 0 && j == 0)
+        continue;
+      int res_x = mod(x + i, FIELD_SIZE_X);
+      int res_y = mod(y + j, FIELD_SIZE_Y);
+      if (field[res_y][res_x].kind == kind && field[res_y][res_x].active &&
+          field[res_y][res_x].value > 8) {
+        if (out_res_x)
+          *out_res_x = res_x;
+        if (out_res_y)
+          *out_res_y = res_y;
+        return true;
+      }
+    }
+  return false;
+}
+
+static bool random_empty_around(int x, int y, int *out_res_x, int *out_res_y) {
+  bool is_there_empty = false;
+  for (int i = -1; i <= 1; i++)
+    for (int j = -1; j <= 1; j++) {
+      if (i == 0 && j == 0)
+        continue;
+      int res_x = mod(x + i, FIELD_SIZE_X);
+      int res_y = mod(y + j, FIELD_SIZE_Y);
+      is_there_empty |= field[res_y][res_x].kind == EMPTY;
+    }
+  if (!is_there_empty)
+    return false;
+
+  do {
+    *out_res_x = mod(x + GetRandomValue(-1, 1), FIELD_SIZE_X);
+    *out_res_y = mod(y + GetRandomValue(-1, 1), FIELD_SIZE_Y);
+  } while (field[*out_res_y][*out_res_x].kind != EMPTY);
+  return true;
+}
+
+static void step(void) {
+  // Rabbits
+  for (int y = 0; y < FIELD_SIZE_Y; y++)
+    for (int x = 0; x < FIELD_SIZE_X; x++)
+      if (field[y][x].kind == RABBIT && field[y][x].active) {
+        field[y][x].value = 10;
+        int r = GetRandomValue(1, 11);
+        int around_x, around_y;
+        if (r <= 2) {
+          // Give birth
+          if (!random_empty_around(x, y, &around_x, &around_y))
+            continue;
+          field[around_y][around_x].kind = RABBIT;
+          field[around_y][around_x].active = false;
+        } else {
+          // Move
+          if (!random_empty_around(x, y, &around_x, &around_y))
+            continue;
+          field[around_y][around_x].kind = RABBIT;
+          field[around_y][around_x].active = false;
+          field[around_y][around_x].value = 10;
+          field[y][x].kind = EMPTY;
+        }
+      }
+  for (int y = 0; y < FIELD_SIZE_Y; y++)
+    for (int x = 0; x < FIELD_SIZE_X; x++)
+      if (field[y][x].kind == RABBIT)
+        field[y][x].active = true;
+
+  // Wolfs
+  for (int y = 0; y < FIELD_SIZE_Y; y++)
+    for (int x = 0; x < FIELD_SIZE_X; x++)
+      if ((field[y][x].kind == FEMALE_WOLF || field[y][x].kind == MALE_WOLF) &&
+          field[y][x].active) {
+        if (field[y][x].value > 8) {
+          // Try to mate
+          int mate_x, mate_y, empty_x, empty_y;
+          if (field[y][x].kind == FEMALE_WOLF) {
+            // Female wolf
+            if (is_active_around(x, y, MALE_WOLF, &mate_x, &mate_y)) {
+              if (!random_empty_around(x, y, &empty_x, &empty_y)) {
+                field[y][x].value -= 1;
+                if (field[y][x].value == 0) // Death
+                  field[y][x].kind = EMPTY;
+                continue;
+              }
+              field[empty_y][empty_x].kind =
+                  GetRandomValue(0, 1) ? FEMALE_WOLF : MALE_WOLF;
+              field[empty_y][empty_x].value = 10;
+              field[empty_y][empty_x].active = false;
+              field[y][x].active = false;
+              field[mate_y][mate_x].active = false;
+            }
+          } else {
+            // Male wolf
+            if (is_active_around(x, y, FEMALE_WOLF, &mate_x, &mate_y)) {
+              if (!random_empty_around(x, y, &empty_x, &empty_y)) {
+                field[y][x].value -= 1;
+                if (field[y][x].value == 0) // Death
+                  field[y][x].kind = EMPTY;
+                continue;
+              }
+              field[empty_y][empty_x].kind =
+                  GetRandomValue(0, 1) ? FEMALE_WOLF : MALE_WOLF;
+              field[empty_y][empty_x].value = 10;
+              field[empty_y][empty_x].active = false;
+              field[y][x].active = false;
+              field[mate_y][mate_x].active = false;
+            }
+          }
+          field[y][x].value -= 1;
+        } else if (field[y][x].value <= 5) {
+          // Seek meat
+          int prey_x, prey_y;
+          if (is_active_around(x, y, RABBIT, &prey_x, &prey_y)) {
+            printf("Nom nom\n");
+            field[prey_y][prey_x].kind = field[y][x].kind;
+            field[prey_y][prey_x].value = 9;
+            field[y][x].kind = EMPTY;
+          } else {
+            // Move
+            int around_x, around_y;
+            if (!random_empty_around(x, y, &around_x, &around_y)) {
+              field[y][x].value -= 1;
+              if (field[y][x].value == 0) // Death
+                field[y][x].kind = EMPTY;
+              continue;
+            }
+            field[around_y][around_x].kind = field[y][x].kind;
+            field[around_y][around_x].value = field[y][x].value - 1;
+            if (field[around_y][around_x].value == 0) // Death
+              field[around_y][around_x].kind = EMPTY;
+            field[around_y][around_x].active = false;
+            field[y][x].kind = EMPTY;
+          }
+        } else {
+          // Move
+          int around_x, around_y;
+          if (!random_empty_around(x, y, &around_x, &around_y)) {
+            field[y][x].value -= 1;
+            continue;
+          }
+          field[around_y][around_x].kind = field[y][x].kind;
+          field[around_y][around_x].value = field[y][x].value - 1;
+          field[around_y][around_x].active = false;
+          field[y][x].kind = EMPTY;
+        }
+      }
+
+  for (int y = 0; y < FIELD_SIZE_Y; y++)
+    for (int x = 0; x < FIELD_SIZE_X; x++)
+      field[y][x].active = true;
+  day += 1;
 }
 
 int main(void) {
@@ -130,8 +288,10 @@ int main(void) {
       if (CheckCollisionPointRec(mouse, reset_rec)) {
         reset();
         printf("Reset...\n");
-      } else if (CheckCollisionPointRec(mouse, step_rec))
+      } else if (CheckCollisionPointRec(mouse, step_rec)) {
+        step();
         printf("Step...\n");
+      }
     }
   inputEnd:
     // INPUT END
