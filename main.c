@@ -9,6 +9,8 @@
 #define FPS 60
 #define RESET_STR "Reset"
 #define STEP_STR "Step"
+#define START_STR "Start/Stop"
+#define FRAMES_PER_STEP 15
 
 #define FIELD_X GAP
 #define FIELD_Y 160
@@ -39,6 +41,7 @@ static char day_str[STR_SIZE];
 static Rectangle amount_btn_rects[3][2];
 static Rectangle reset_rec;
 static Rectangle step_rec;
+static Rectangle start_rec;
 
 typedef struct {
   uint8_t kind;
@@ -48,6 +51,8 @@ typedef struct {
 
 static Cell field[FIELD_SIZE_Y][FIELD_SIZE_X];
 static char energy_str[STR_SIZE];
+static bool playing = false;
+static int playing_timer = 0;
 
 static int mod(int a, int b) { return (a % b + b) % b; }
 
@@ -102,24 +107,30 @@ static bool is_active_around(int x, int y, int kind, int *out_res_x,
   return false;
 }
 
-static bool random_empty_around(int x, int y, int *out_res_x, int *out_res_y) {
-  bool is_there_empty = false;
+static bool random_kind_around(int x, int y, int kind, int *out_res_x,
+                               int *out_res_y) {
+  bool is_there_kind = false;
   for (int i = -1; i <= 1; i++)
     for (int j = -1; j <= 1; j++) {
       if (i == 0 && j == 0)
         continue;
       int res_x = mod(x + i, FIELD_SIZE_X);
       int res_y = mod(y + j, FIELD_SIZE_Y);
-      is_there_empty |= field[res_y][res_x].kind == EMPTY;
+      is_there_kind |= field[res_y][res_x].kind == kind;
     }
-  if (!is_there_empty)
+  if (!is_there_kind)
     return false;
 
   do {
     *out_res_x = mod(x + GetRandomValue(-1, 1), FIELD_SIZE_X);
     *out_res_y = mod(y + GetRandomValue(-1, 1), FIELD_SIZE_Y);
-  } while (field[*out_res_y][*out_res_x].kind != EMPTY);
+  } while (field[*out_res_y][*out_res_x].kind != kind);
   return true;
+}
+
+static void death_check(int x, int y) {
+  if (--field[y][x].value <= 0)
+    field[y][x].kind = EMPTY;
 }
 
 static void step(void) {
@@ -132,13 +143,13 @@ static void step(void) {
         int around_x, around_y;
         if (r <= 2) {
           // Give birth
-          if (!random_empty_around(x, y, &around_x, &around_y))
+          if (!random_kind_around(x, y, EMPTY, &around_x, &around_y))
             continue;
           field[around_y][around_x].kind = RABBIT;
           field[around_y][around_x].active = false;
         } else {
           // Move
-          if (!random_empty_around(x, y, &around_x, &around_y))
+          if (!random_kind_around(x, y, EMPTY, &around_x, &around_y))
             continue;
           field[around_y][around_x].kind = RABBIT;
           field[around_y][around_x].active = false;
@@ -162,10 +173,8 @@ static void step(void) {
           if (field[y][x].kind == FEMALE_WOLF) {
             // Female wolf
             if (is_active_around(x, y, MALE_WOLF, &mate_x, &mate_y)) {
-              if (!random_empty_around(x, y, &empty_x, &empty_y)) {
-                field[y][x].value -= 1;
-                if (field[y][x].value == 0) // Death
-                  field[y][x].kind = EMPTY;
+              if (!random_kind_around(x, y, EMPTY, &empty_x, &empty_y)) {
+                death_check(x, y);
                 continue;
               }
               field[empty_y][empty_x].kind =
@@ -178,10 +187,8 @@ static void step(void) {
           } else {
             // Male wolf
             if (is_active_around(x, y, FEMALE_WOLF, &mate_x, &mate_y)) {
-              if (!random_empty_around(x, y, &empty_x, &empty_y)) {
-                field[y][x].value -= 1;
-                if (field[y][x].value == 0) // Death
-                  field[y][x].kind = EMPTY;
+              if (!random_kind_around(x, y, EMPTY, &empty_x, &empty_y)) {
+                death_check(x, y);
                 continue;
               }
               field[empty_y][empty_x].kind =
@@ -196,31 +203,28 @@ static void step(void) {
         } else if (field[y][x].value <= 5) {
           // Seek meat
           int prey_x, prey_y;
-          if (is_active_around(x, y, RABBIT, &prey_x, &prey_y)) {
+          if (random_kind_around(x, y, RABBIT, &prey_x, &prey_y)) {
             printf("Nom nom\n");
             field[prey_y][prey_x].kind = field[y][x].kind;
-            field[prey_y][prey_x].value = 9;
+            field[prey_y][prey_x].value = 10;
             field[y][x].kind = EMPTY;
           } else {
             // Move
             int around_x, around_y;
-            if (!random_empty_around(x, y, &around_x, &around_y)) {
-              field[y][x].value -= 1;
-              if (field[y][x].value == 0) // Death
-                field[y][x].kind = EMPTY;
+            if (!random_kind_around(x, y, EMPTY, &around_x, &around_y)) {
+              death_check(x, y);
               continue;
             }
             field[around_y][around_x].kind = field[y][x].kind;
-            field[around_y][around_x].value = field[y][x].value - 1;
-            if (field[around_y][around_x].value == 0) // Death
-              field[around_y][around_x].kind = EMPTY;
+            field[around_y][around_x].value = field[y][x].value;
+            death_check(around_x, around_y);
             field[around_y][around_x].active = false;
             field[y][x].kind = EMPTY;
           }
         } else {
           // Move
           int around_x, around_y;
-          if (!random_empty_around(x, y, &around_x, &around_y)) {
+          if (!random_kind_around(x, y, EMPTY, &around_x, &around_y)) {
             field[y][x].value -= 1;
             continue;
           }
@@ -263,6 +267,11 @@ int main(void) {
                          .y = MAIN_FONT_SIZE + GAP * 2,
                          .width = MeasureText(STEP_STR, MAIN_FONT_SIZE),
                          .height = MAIN_FONT_SIZE};
+  start_rec =
+      (Rectangle){.x = far_x + MeasureText(STEP_STR, MAIN_FONT_SIZE) + GAP,
+                  .y = MAIN_FONT_SIZE + GAP * 2,
+                  .width = MeasureText(START_STR, MAIN_FONT_SIZE),
+                  .height = MAIN_FONT_SIZE};
   // INIT END
 
   while (!WindowShouldClose()) {
@@ -291,6 +300,9 @@ int main(void) {
       } else if (CheckCollisionPointRec(mouse, step_rec)) {
         step();
         printf("Step...\n");
+      } else if (CheckCollisionPointRec(mouse, start_rec)) {
+        playing = !playing;
+        printf("Start...\n");
       }
     }
   inputEnd:
@@ -325,6 +337,9 @@ int main(void) {
         DrawText(STEP_STR, far_x, MAIN_FONT_SIZE + GAP * 2, MAIN_FONT_SIZE,
                  BLACK);
 
+        DrawRectangleRec(start_rec, LIGHTGRAY);
+        DrawText(START_STR, start_rec.x, start_rec.y, MAIN_FONT_SIZE, BLACK);
+
         DrawText(day_str, far_x, MAIN_FONT_SIZE * 2 + GAP * 3, MAIN_FONT_SIZE,
                  BLACK);
       }
@@ -358,5 +373,10 @@ int main(void) {
       }
     }
     EndDrawing();
+
+    if (playing && ++playing_timer > FRAMES_PER_STEP) {
+      playing_timer = 0;
+      step();
+    }
   }
 }
