@@ -133,6 +133,18 @@ static void death_check(int x, int y) {
     field[y][x].kind = EMPTY;
 }
 
+static bool try_give_wolf_birth(int x, int y, int mate_x, int mate_y) {
+  int empty_x, empty_y;
+  if (!random_kind_around(x, y, EMPTY, &empty_x, &empty_y))
+    return false;
+  field[empty_y][empty_x].kind = GetRandomValue(0, 1) ? FEMALE_WOLF : MALE_WOLF;
+  field[empty_y][empty_x].value = 10;
+  field[empty_y][empty_x].active = false;
+  field[y][x].active = false;
+  field[mate_y][mate_x].active = false;
+  return true;
+}
+
 static void step(void) {
   // Rabbits
   for (int y = 0; y < FIELD_SIZE_Y; y++)
@@ -169,35 +181,21 @@ static void step(void) {
           field[y][x].active) {
         if (field[y][x].value > 8) {
           // Try to mate
-          int mate_x, mate_y, empty_x, empty_y;
+          int mate_x, mate_y;
           if (field[y][x].kind == FEMALE_WOLF) {
             // Female wolf
-            if (is_active_around(x, y, MALE_WOLF, &mate_x, &mate_y)) {
-              if (!random_kind_around(x, y, EMPTY, &empty_x, &empty_y)) {
+            if (is_active_around(x, y, MALE_WOLF, &mate_x, &mate_y))
+              if (!try_give_wolf_birth(x, y, mate_x, mate_y)) {
                 death_check(x, y);
                 continue;
               }
-              field[empty_y][empty_x].kind =
-                  GetRandomValue(0, 1) ? FEMALE_WOLF : MALE_WOLF;
-              field[empty_y][empty_x].value = 10;
-              field[empty_y][empty_x].active = false;
-              field[y][x].active = false;
-              field[mate_y][mate_x].active = false;
-            }
           } else {
             // Male wolf
-            if (is_active_around(x, y, FEMALE_WOLF, &mate_x, &mate_y)) {
-              if (!random_kind_around(x, y, EMPTY, &empty_x, &empty_y)) {
+            if (is_active_around(x, y, FEMALE_WOLF, &mate_x, &mate_y))
+              if (!try_give_wolf_birth(x, y, mate_x, mate_y)) {
                 death_check(x, y);
                 continue;
               }
-              field[empty_y][empty_x].kind =
-                  GetRandomValue(0, 1) ? FEMALE_WOLF : MALE_WOLF;
-              field[empty_y][empty_x].value = 10;
-              field[empty_y][empty_x].active = false;
-              field[y][x].active = false;
-              field[mate_y][mate_x].active = false;
-            }
           }
           field[y][x].value -= 1;
         } else if (field[y][x].value <= 5) {
@@ -272,6 +270,7 @@ int main(void) {
                   .y = MAIN_FONT_SIZE + GAP * 2,
                   .width = MeasureText(START_STR, MAIN_FONT_SIZE),
                   .height = MAIN_FONT_SIZE};
+  reset();
   // INIT END
 
   while (!WindowShouldClose()) {
